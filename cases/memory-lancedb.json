@@ -1,5 +1,5 @@
 {
   "package": "@openclaw/memory-lancedb",
-  "version": "2026.11.6",
+  "version": "2026.11.7",
   "plugin": "memory-lancedb"
 }
