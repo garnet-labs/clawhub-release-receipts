@@ -51,8 +51,18 @@ if [[ "$1" == first-load ]]; then
 fi
 
 [[ "$1" == install ]]
+plugin=$(jq -er '.plugin | select(test("^[a-z0-9-]+$"))' "$2")
 package=$(jq -er '.package | select(test("^(@[a-z0-9-]+/)?[a-z0-9-]+$"))' "$2")
 version=$(jq -er '.version | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))' "$2")
+root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+scan="$root/clawscan/$plugin/$version/scan.json"
+if ! expected=$(jq -er --arg package "$package" --arg version "$version" '
+    select(.package == $package and .version == $version)
+    | .sha256 | select(test("^[a-f0-9]{64}$"))
+  ' "$scan"); then
+  printf 'Missing or invalid scan digest for %s@%s: %s\n' "$package" "$version" "$scan" >&2
+  exit 1
+fi
 docker network create --opt "com.docker.network.bridge.name=$bridge" \
   --ipv6=false --subnet "$subnet" "$network" >/dev/null
 
@@ -71,3 +81,17 @@ within_container /bin/sh -eu -c '
     openclaw plugins install "$1"
     openclaw plugins list
   ' sh "clawhub:$package@$version"
+
+escaped_package=$(jq -rn --arg package "$package" '$package | @uri')
+artifact_url="https://clawhub.ai/api/v1/packages/$escaped_package/versions/$version/artifact/download"
+if ! checksum=$(curl --fail --silent --show-error --location --max-time 120 "$artifact_url" | sha256sum); then
+  printf 'Could not retrieve ClawHub artifact for %s@%s\n' "$package" "$version" >&2
+  exit 1
+fi
+actual=${checksum%% *}
+if [[ "$actual" != "$expected" ]]; then
+  printf 'ClawHub artifact SHA-256 mismatch for %s@%s: expected %s, got %s\n' \
+    "$package" "$version" "$expected" "$actual" >&2
+  exit 1
+fi
+printf 'Verified ClawHub release artifact SHA-256 for %s@%s: %s\n' "$package" "$version" "$actual"
