@@ -23,13 +23,26 @@ function findings(artifact) {
   })));
 }
 
-function profileBinding(profile, expected, capture) {
-  if (!profile || !expected || !['best-effort', 'complete'].includes(capture)) return false;
+function profileBinding(profile, expected) {
+  if (!profile || !expected) return false;
   const run = profile.run;
   const fields = ['repository', 'run_id', 'profile_id', 'job', 'head_sha', 'commit_sha'];
   return fields.every(key => typeof expected[key] === 'string' && expected[key].length > 0
     && String(run?.[key]) === expected[key])
     && (expected.job_index === undefined || Number.isInteger(expected.job_index) && run.job_index === expected.job_index);
+}
+
+function time(value) {
+  return typeof value === 'string' && /^\d{4}-\d\d-\d\dT.*(?:Z|[+-]\d\d:\d\d)$/.test(value)
+    ? Date.parse(value) : NaN;
+}
+
+function phaseFor(record, windows) {
+  if (record.timestamp == null) return 'job';
+  const observed = time(record.timestamp);
+  const matches = windows.filter(window => observed >= time(window.started_at)
+    && observed < time(window.completed_at));
+  return matches.length === 1 ? matches[0].phase : null;
 }
 
 function profileActions(profile, types, windows) {
@@ -41,20 +54,28 @@ function profileActions(profile, types, windows) {
   ];
   const rows = [];
   let excluded = 0;
+  let substrate = 0;
+  let untimestamped = 0;
   for (const [kind, key, targetsFor] of records) {
     if (!types.includes(kind) || !Array.isArray(profile[key])) continue;
     profile[key].forEach((record, index) => {
-      const window = windows.find(item => item.step === record.github_step);
+      if (record.timestamp == null) untimestamped += 1;
       const chain = strings(record.ancestry);
       const targets = targetsFor(record);
-      if (!window || record.lineage_recorded !== true || chain.length === 0 || targets.length === 0) {
+      if (record.lineage_recorded === true && chain.length > 0 && !chain.includes('Runner.Worker')) {
+        substrate += 1;
+      }
+      const phase = phaseFor(record, windows);
+      if (phase === null || record.lineage_recorded !== true || !chain.includes('Runner.Worker')
+        || targets.length === 0) {
         excluded += 1;
         return;
       }
-      rows.push({ kind, targets, chain, phase: window.phase, pointer: `/profile/${key}/${index}` });
+      const network = kind === 'connection' ? { protocol: record.protocol, ports: strings(record.remote_ports) } : {};
+      rows.push({ kind, targets, chain, phase, ...network, pointer: `/profile/${key}/${index}` });
     });
   }
-  return { rows, excluded };
+  return { rows, excluded, substrate, untimestamped };
 }
 
 function valueAt(source, pointer) {
@@ -76,6 +97,8 @@ function applicability(rule, sources, staticIds) {
 
 function matchRule(row, rule) {
   if (row.kind !== rule.kind || row.phase !== rule.phase || !row.targets.includes(rule.target)) return null;
+  if (rule.protocol !== undefined && row.protocol !== rule.protocol) return null;
+  if (rule.port !== undefined && !row.ports?.some(port => port.split(' ')[0] === rule.port)) return null;
   if (rule.kind === 'connection' && !rule.chainSuffix?.length) return 'weak';
   return chainMatches(row.chain, rule.chainSuffix) ? 'strong' : null;
 }
@@ -86,18 +109,21 @@ export function correlateRelease(input) {
   const staticFindings = findings(sources.clawscan);
   const staticIds = new Set((staticFindings ?? []).map(finding => finding.id));
   const windows = (runtime.windows ?? []).filter(window => window.covered === true);
-  const bound = profileBinding(profile, runtime.expected, runtime.capture);
+  const bound = profileBinding(profile, runtime.expected);
   const observedTypes = bound ? (runtime.actionTypes ?? []).filter(kind => {
     const field = { connection: 'associations', 'file-write': 'file_writes', 'child-process': 'child_processes' }[kind];
     return typeof field === 'string' && Array.isArray(profile[field]);
   }) : [];
-  const hasRuntime = bound && windows.length > 0 && observedTypes.length > 0;
+  const hasRuntime = observedTypes.length > 0 && ['best-effort', 'complete'].includes(runtime.capture);
   const applicable = rules.map(rule => ({
     ...rule,
     label: applicability(rule, sources, staticIds),
   }));
-  const { rows, excluded } = hasRuntime ? profileActions(profile, observedTypes, windows) : { rows: [], excluded: 0 };
-  const classified = rows.map(row => {
+  const { rows, excluded, substrate, untimestamped } = observedTypes.length > 0
+    ? profileActions(profile, observedTypes, windows)
+    : { rows: [], excluded: 0, substrate: 0, untimestamped: 0 };
+  const hasJobRows = rows.some(row => row.phase === 'job');
+  const classified = (hasRuntime ? rows : []).map(row => {
     const matches = applicable.flatMap(rule => {
       const strength = matchRule(row, rule);
       return strength === null ? [] : [{ rule: rule.id, evidence: rule.evidence, strength, label: rule.label }];
@@ -111,9 +137,9 @@ export function correlateRelease(input) {
     const matches = classified.filter(row => row.matches.some(match => match.strength === 'strong'
       && match.evidence.source === 'clawscan' && match.evidence.pointer === finding.id));
     const scope = applicabilityByFinding[finding.id];
-    const observedWindow = scope && windows.some(window => window.phase === scope.phase);
+    const observedWindow = scope && (scope.phase === 'job' || windows.some(window => window.phase === scope.phase));
     const state = matches.length > 0 ? 'observed'
-      : !hasRuntime || !scope ? 'undeterminable'
+      : !hasRuntime || !scope || scope.phase !== 'job' && hasJobRows ? 'undeterminable'
         : !observedWindow ? 'out of window'
           : observedTypes.includes(scope.kind) ? 'not observed' : 'undeterminable';
     return { ...finding, state, runtime: matches.map(row => row.pointer) };
@@ -127,10 +153,10 @@ export function correlateRelease(input) {
     advisory: auditAvailable ? 'available' : 'undeterminable',
     manifest: sources.manifest && sources.package ? 'available' : 'undeterminable',
   };
-  const eligible = hasRuntime && staticFindings !== null && statuses.manifest === 'available'
+  const eligible = hasRuntime && rows.length > 0 && staticFindings !== null && statuses.manifest === 'available'
     && auditAvailable && input.reviewedRules === true;
   return {
-    release, statuses, eligible, observedTypes, excluded,
+    release, statuses, eligible, observedTypes, excluded, substrate, untimestamped, workload: rows.length,
     // Unavailable evidence is never rendered as an empty, successful card.
     card: eligible ? classified.filter(row => row.label === 'new') : null,
     rows: classified, reverse,
