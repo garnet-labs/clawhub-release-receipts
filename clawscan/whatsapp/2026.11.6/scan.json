@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "release-scan-summary-v1",
+  "sourceSchemaVersion": "clawscan-run-v1",
+  "package": "@openclaw/whatsapp",
+  "version": "2026.11.6",
+  "artifactKind": "npm-pack",
+  "sha256": "01dc6ed79e95e8c01578358f21188062b8b5e6e4d2adad3b02ff6fd514aeaa83",
+  "profile": "clawhub",
+  "runtimeImage": "ghcr.io/openclaw/clawscan-runtime@sha256:d494938b84a9f0da40504f611eec472d4637c755b5cef87b123daf8a2014545c",
+  "scannerCommit": "96e9849d610a9971fee885992bdf90242c3f1f81",
+  "exitCode": 0,
+  "elapsedSeconds": 448.2,
+  "status": "completed",
+  "complete": true,
+  "gate": "pass",
+  "scanners": {
+    "aig-mcp": "completed"
+  },
+  "judge": {
+    "status": "completed",
+    "verdict": "benign"
+  },
+  "overview": "completed"
+}
