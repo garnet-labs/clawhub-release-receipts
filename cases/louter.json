@@ -1,0 +1,5 @@
+{
+  "package": "@liseman/openclaw-louter",
+  "version": "0.2.8",
+  "plugin": "louter"
+}

@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "release-scan-summary-v1",
+  "sourceSchemaVersion": "clawscan-run-v1",
+  "package": "@openclaw/memory-lancedb",
+  "version": "2026.11.6",
+  "artifactKind": "npm-pack",
+  "sha256": "846b3397cc1cf0d5d95711b07642658c65c32f437bd4e40d476e03e2e66bad25",
+  "profile": "clawhub",
+  "runtimeImage": "ghcr.io/openclaw/clawscan-runtime@sha256:d494938b84a9f0da40504f611eec472d4637c755b5cef87b123daf8a2014545c",
+  "scannerCommit": "96e9849d610a9971fee885992bdf90242c3f1f81",
+  "exitCode": 0,
+  "elapsedSeconds": 249.1,
+  "status": "completed",
+  "complete": true,
+  "gate": "pass",
+  "scanners": {
+    "aig-mcp": "completed"
+  },
+  "judge": {
+    "status": "completed",
+    "verdict": "benign"
+  },
+  "overview": "completed"
+}

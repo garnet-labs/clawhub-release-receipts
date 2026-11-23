@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "release-scan-summary-v1",
+  "sourceSchemaVersion": "clawscan-run-v1",
+  "package": "jep-guard-clawhub",
+  "version": "1.1.6",
+  "artifactKind": "legacy-zip",
+  "sha256": "ccaf3cc6a7015ea4f7c4759002c99423230c0674064d96f4d2f9aebfd50f5ddb",
+  "profile": "clawhub",
+  "runtimeImage": "ghcr.io/openclaw/clawscan-runtime@sha256:d494938b84a9f0da40504f611eec472d4637c755b5cef87b123daf8a2014545c",
+  "scannerCommit": "96e9849d610a9971fee885992bdf90242c3f1f81",
+  "targetSelector": "openclaw.plugin.json",
+  "exitCode": 0,
+  "elapsedSeconds": 298.6,
+  "status": "completed",
+  "complete": true,
+  "gate": "pass",
+  "scanners": {
+    "aig-mcp": "completed"
+  },
+  "judge": {
+    "status": "completed",
+    "verdict": "benign"
+  },
+  "overview": "completed"
+}
