@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      matrix_release:
+        description: Matrix version to run directly on the runner
+        type: choice
+        options: [container, '2026.11.6', '2026.11.7']
+        default: container
 
 permissions: {}
 
@@ -15,7 +21,9 @@ concurrency:
 jobs:
   install:
     name: Install ${{ matrix.plugin }}
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
+      (github.event_name != 'workflow_dispatch' || inputs.matrix_release == 'container')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -52,6 +60,50 @@ jobs:
       - name: Remove workload container
         if: always()
         run: bash scripts/install-release.sh cleanup
+
+      - name: Let sensor settle
+        if: always()
+        run: sleep 30
+
+  install_matrix:
+    name: Install Matrix directly
+    if: github.event_name == 'workflow_dispatch' && inputs.matrix_release != 'container'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: '24.22.3'
+
+      - name: Prepare OpenClaw runtime
+        env:
+          MATRIX_RELEASE: ${{ inputs.matrix_release }}
+        run: |
+          case "$MATRIX_RELEASE" in
+            2026.11.6|2026.11.7) ;;
+            *) exit 1 ;;
+          esac
+          root=$(mktemp -d "$RUNNER_TEMP/openclaw.XXXXXXXX")
+          jq --arg version "$MATRIX_RELEASE" '.version = $version' cases/matrix.json > "$root/matrix.json"
+          npm install --global --prefix "$root" --registry=https://registry.npmjs.org --no-audit --no-fund openclaw@2026.11.7
+          test "$(node --version)" = v24.22.3
+          test "$(node -p 'require(process.argv[1]).version' "$root/lib/node_modules/openclaw/package.json")" = 2026.11.7
+          printf 'OPENCLAW_RUNNER_ROOT=%s\n' "$root" >> "$GITHUB_ENV"
+
+      - uses: garnet-org/action@673a06d87748bec49e4d8df22d371b2a3420aba4 # v2.5.2
+
+      - name: Install and list plugins
+        run: bash scripts/install-release.sh install "$OPENCLAW_RUNNER_ROOT/matrix.json"
+
+      - name: First load
+        run: bash scripts/install-release.sh first-load "$OPENCLAW_RUNNER_ROOT/matrix.json"
 
       - name: Let sensor settle
         if: always()
